@@ -1,0 +1,992 @@
+\documentclass{article}
+
+\title{\texttt{Appendix}}
+\author{Louisa Boulaziz}
+\date{\today}
+\begin{document}
+
+\maketitle 
+\tableofcontents
+\newpage
+
+<<setup, include=FALSE, cache=FALSE>>=
+muffleError <- function(x,options) {}
+knit_hooks$set(error=muffleError)
+@
+
+\section{Loading in data and packages}
+In this section I am loading in the data and all the packages I use to run the analysis. 
+<<loadin in data, echo=TRUE, results='markup', include=FALSE>>=
+
+setwd("~/Dropbox (UiO)/Project A/Appendix")
+
+load("sample_louisas_lawyers.rda")
+
+data <- data1
+
+rm(data1)
+
+library(broom.mixed)
+
+
+
+
+library(pROC)
+library(ggplot2)
+library(car)
+library(DescTools)
+library(ResourceSelection)
+library(ggthemes)
+library(jtools)
+library(broom)
+library(modelr)
+library(sandwich)
+library(MatchIt)
+library(stargazer)
+library(tidyverse)
+library(cobalt)
+library(MASS)
+
+@
+
+\section{Structure of the data}
+I have coded all the parties in all preliminary reference cases and their lawyers from the first judgment issued in CJEU dating to 2016. I have merged this data together with the data used in the Carrubba et al (2008) article. Thus the data consists of all cases dating from 1964 to 1995 for which Carrubba et al has coded the outcome of the case. In the sample I have 2770 observations. Each new row in the dataset is an applicant or a defendant in a preliminary reference case. The applicant and the defendant are nested in a case, and they either have a lawyer or they do not (binary indicator). If they have a lawyer or lawyer team which has experience this is also flagged (binary indicator). The parties also win or loses a case which is also a binary indicator. In the data I have information about the number of member state governments who submits observations in favor of either the applicant or the defendant. I do also have whether or not the commission submitted observations in favor of either the applicant or the defendant. I have a case salience measure -- the total number of governments who submits observations. 
+<<structure, echo=TRUE, results='markup'>>=
+
+# Total number of cases in the data
+length(unique(data$celex))
+
+table(data$member_state) 
+
+
+@
+
+
+\section{Dependent variable}
+I have two variables that measures whether the applicant or defendant won the case. One is at the case level -- \texttt{ecjplaintiffagree} -- and the other one is at the level of the role in the dispute -- \texttt{favorable\_ruling}. These variables measures the same thing -- the cases the applicants win and the cases the defendants win. 
+
+<<dependent var, echo=TRUE, results='markup'>>=
+
+winning <- data %>% 
+  select(ecjplaintiffagree, celex)
+
+winning <- distinct(winning)
+
+win_rate <- table(winning$ecjplaintiffagree)
+
+# Who wins in percentage
+prop.table(win_rate)*100
+
+# Visualizing it 
+
+winning %>% 
+  count(ecjplaintiffagree) %>% 
+  mutate(perc = n / nrow(winning)) -> winning1
+
+winning1$ecjplaintiffagree <- ifelse(winning1$ecjplaintiffagree == 0, "Defendant", "Applicant")
+
+ggplot(winning1, aes(as.factor(ecjplaintiffagree), (perc*100))) + 
+  geom_col(color = "purple", fill = "purple") + 
+  scale_y_continuous() + 
+  ylab("Percentage of cases") + 
+  xlab("")+
+  ggtitle("Who wins in the CJEU?")+
+  theme_minimal()
+
+
+
+
+@
+\section{Main independent variables}
+I focus on three main explanatory variables in the analysis: \texttt{experience}, \texttt{lawyer} and \texttt{salience}. I describe them more in detail below. 
+
+\subsection{Treatment}
+The treatment-variable is grouped at the level of the role in the legal dispute. This means that it measures whether or not the applicants and the defendants have received the treatment. The treatment is whether or not the applicant or the defendant has a lawyer or lawyer team which have prior litigation experience. Note that all 1s represent lawyers and lawyer teams that have at least argued one prior case at the CJEU. All 0s represent non-lawyers -- that means when applicants and defendants come to court without representation the treatment shows 0. The treatment also shows 0 for applicant and defendants who come to court with lawyers without prior litigation experience. 
+
+<<treatment, echo=TRUE, results='markup'>>=
+
+data %>% 
+  group_by(celex, role, experience) %>% 
+  ggplot(aes(as.factor(role), fill = as.factor(experience))) + 
+  geom_bar(position = "dodge", aes(y = (..count..)/sum(..count..)*100)) + 
+  ylab("Percent") + 
+  labs(fill = "Experience") + 
+  scale_fill_manual(values = c( "purple", "red")) + 
+  ggtitle("Who has experienced lawyers?") + 
+  xlab("") + 
+  theme_minimal()
+
+data %>% 
+  group_by(celex, type, experience) %>% 
+  ggplot(aes(as.factor(type), fill = as.factor(experience))) + 
+  geom_bar(position = "dodge", aes(y = (..count..)/sum(..count..)*100)) + 
+  ylab("Percent") + 
+  labs(fill = "Treatment") + 
+  scale_fill_manual(values = c( "purple", "red")) + 
+  ggtitle("Who has experienced lawyers?") + 
+  xlab("")
+
+role_experience <- table(data$role, data$experience)
+prop.table(role_experience)*100
+
+rm(role_experience)
+
+@
+
+\subsection{Lawyer}
+This variable is at the level of the party in the dispute. Here I recode it so that if you came to court as the applicant with another applicant who had a lawyer, you also have a lawyer. 
+<<lawyer, echo=TRUE, results='markup'>>=
+
+
+data %>% 
+  group_by(celex, role, lawyer) %>% 
+  ggplot(aes(as.factor(role), fill = as.factor(lawyer))) + 
+  geom_bar(position = "dodge", aes(y = (..count..)/sum(..count..)*100)) + 
+  ylab("Percent") + 
+  labs(fill = "Lawyer") + 
+  scale_fill_manual(values = c( "purple", "red")) + 
+  ggtitle("Who has representation?")+ 
+  xlab("") + 
+  theme_minimal()
+
+
+data %>% 
+  group_by(celex, type, lawyer) %>% 
+  ggplot(aes(as.factor(type), fill = as.factor(lawyer))) + 
+  geom_bar(position = "dodge", aes(y = (..count..)/sum(..count..)*100)) + 
+  ylab("Percent") + 
+  labs(fill = "Lawyer") + 
+  scale_fill_manual(values = c( "purple", "red")) + 
+  ggtitle("Who has representation?")+ 
+  xlab("")
+
+role_lawyer <- table(data$role, data$lawyer)
+prop.table(role_lawyer)*100
+17.29242+28.23105
+rm(role_lawyer)
+@
+
+\subsection{Salience}
+Salience is measured as number of EU governments that submit observations in cases referred to the CJEU. I create this variable by adding up the number of governments that submits observations in favor of the applicant and in favor of the defendant. I create a salience measure to seperate between salient and non salient cases. To make this variable I flag all cases that has above the average submitted observations
+<<salience, echo=TRUE, results='markup'>>=
+
+summary(data$salience)
+
+length(unique(data$celex)) # Total number of cases 
+
+# Total number of cases
+data %>% 
+  select(celex, salience) %>% 
+  group_by(celex) %>% 
+  count(salience) %>% 
+  ggplot(aes(as.factor(salience))) + 
+  geom_bar(color = "violet", fill = "violet") + 
+  xlab("No. of governments") + 
+  ylab("No. of cases") + 
+  theme_minimal() +
+  ggtitle("Submitted observations by EU member state governments")
+
+# Percentage of cases 
+data %>% 
+  select(celex, salience) %>% 
+  group_by(celex) %>% 
+  count(salience) %>% 
+  ggplot(aes(as.factor(salience))) + 
+  geom_bar(color = "violet", fill = "violet", aes(y = (..count..)/sum(..count..)*100)) + 
+  xlab("No. of governments") + 
+  ylab("Percentage of cases") + 
+  theme_minimal() +
+  ggtitle("Submitted observations by member state governments")
+
+## Binary measure of salience
+
+table(data$binary_salience)
+
+data %>% 
+  select(celex, binary_salience) %>% 
+  group_by(celex) %>% 
+  count(binary_salience) %>% 
+  ggplot(aes(as.factor(binary_salience))) + 
+  geom_bar(color = "violet", fill = "violet", aes(y = (..count..)/sum(..count..)*100)) + 
+  xlab("Salient cases flagged as 1") + 
+  ylab("Percent of cases") + 
+  theme_minimal() +
+  ggtitle("Cases considered salient")
+
+prop.table(table(data$binary_salience))*100
+
+
+@
+
+\section{Control variables}
+\subsection{Type of actor and opponent in court}
+The typical case in the CJEU consists of either a company or an individual against a state institution. State institutions are involved in 40 percent of the cases. Companies meet state institutions in over 60 percent of the time (in over 60 percent of cases they are involved in). In approximately 20 percent of cases a company meets another company in the CJEU. Individuals also meet state institutions in over 60 percent of the cases. Likewise, when looking at who state institutions meet in court, in 50 percent of the cases, they meet companies and in close to 35 percent of cases they meet individuals. 
+<<type, echo=TRUE, results='markup'>>=
+data %>% 
+  select(celex, type, role) %>% 
+  group_by(celex) %>% 
+  count(type) %>% 
+  ggplot(aes(as.factor(type))) + 
+  geom_bar(color = "violet", fill = "violet", aes(y = (..count..)/sum(..count..)*100)) + 
+  xlab("") + 
+  ylab("Percent of cases") + 
+  theme_minimal() +
+  ggtitle("Who litigates before the CJEU?")
+
+
+data %>% 
+  filter(type == "Company") %>% 
+  group_by(celex) %>% 
+   ggplot(aes(type_opponent)) + 
+   geom_bar(color = "violet", fill = "violet", aes(y = (..count..)/sum(..count..)*100)) + 
+  xlab("") + 
+  ylab("Percent of cases") + 
+  theme_minimal() +
+  ggtitle("Who do companies meet in Court?")
+
+
+data %>% 
+  filter(type == "Individual") %>% 
+  group_by(celex) %>% 
+   ggplot(aes(type_opponent)) + 
+   geom_bar(color = "violet", fill = "violet", aes(y = (..count..)/sum(..count..)*100)) + 
+  xlab("") + 
+  ylab("Percent of cases") + 
+  theme_minimal() +
+  ggtitle("Who do individuals meet in Court?")
+
+data %>% 
+  filter(type == "EU institution") %>% 
+  group_by(celex) %>% 
+   ggplot(aes(type_opponent)) + 
+   geom_bar(color = "violet", fill = "violet", aes(y = (..count..)/sum(..count..)*100)) + 
+  xlab("") + 
+  ylab("Percent of cases") + 
+  theme_minimal() +
+  ggtitle("Who do EU institutions meet in Court?")
+
+
+data %>% 
+  filter(type == "State institution") %>% 
+  group_by(celex) %>% 
+   ggplot(aes(type_opponent)) + 
+   geom_bar(color = "violet", fill = "violet", aes(y = (..count..)/sum(..count..)*100)) + 
+  xlab("") + 
+  ylab("Percent of cases") + 
+  theme_minimal() +
+  ggtitle("Who do 'state institutions' meet in the CJEU?")
+
+@
+
+\subsection{Role in legal dispute}
+<<role in legal dispute, echo=TRUE, results='markup'>>=
+
+data %>% 
+  select(celex, role) %>% 
+  group_by(celex) %>% 
+  ggplot(aes(as.factor(role))) + 
+  geom_bar(color = "violet", fill = "violet", aes(y = (..count..)/sum(..count..)*100)) + 
+  xlab("") + 
+  ylab("Percent of cases") + 
+  theme_minimal() +
+  ggtitle("Who litigates before the CJEU?")
+
+@
+
+\subsection{Government support}
+This variable measures whether or not the applicant or defendant had government support. This is measured has a binary indicator. 
+<<government submitted observations, echo=TRUE, results='markup'>>=
+
+table(data$government_support)
+
+# Who has government support in Court? 
+
+
+data %>% 
+  group_by(celex, government_support, role) %>% 
+  ggplot(aes(as.factor(government_support), fill = as.factor(role))) + 
+  geom_bar(position = "dodge", aes(y = (..count..)/sum(..count..)*100)) + 
+  ylab("Percent of cases") + 
+  labs(fill = "Role") + 
+  scale_fill_manual(values = c( "purple", "red")) + 
+  ggtitle("Who receives government support?")+ 
+  xlab("") + 
+  theme_minimal()
+  
+
+data %>% 
+  group_by(celex, government_support, type) %>% 
+  ggplot(aes(as.factor(type), fill = as.factor(government_support))) + 
+  geom_bar(position = "dodge", aes(y = (..count..)/sum(..count..)*100)) + 
+  ylab("Percent of cases") + 
+  labs(fill = "Government support") + 
+  scale_fill_manual(values = c( "purple", "red")) + 
+  ggtitle("Who receives government support?")+ 
+  xlab("")+
+  theme_minimal()
+  
+
+@
+
+\subsection{Commission support}
+This variable indicates whether or not the applicant or defendant in the legal dispute has support from the Commission. The variable is binary. Support from the Commission is flagged as 1.  
+<<commission submitted observations, echo=TRUE, results='markup'>>=
+
+table(data$commission_support)
+
+# Who has commission support in Court? 
+
+
+data %>% 
+  group_by(celex, commission_support, role) %>% 
+  ggplot(aes(as.factor(commission_support), fill = as.factor(role))) + 
+  geom_bar(position = "dodge", aes(y = (..count..)/sum(..count..)*100)) + 
+  ylab("Percent of cases") + 
+  labs(fill = "Role") + 
+  scale_fill_manual(values = c( "purple", "red")) + 
+  ggtitle("Who has Commission support?")+ 
+  xlab("")+ 
+  theme_minimal()
+  
+# Who has commission support in Court?
+
+data %>% 
+  group_by(celex, commission_support, type) %>% 
+  ggplot(aes(as.factor(type), fill = as.factor(commission_support))) + 
+  geom_bar(position = "dodge", aes(y = (..count..)/sum(..count..)*100)) + 
+  ylab("Percent of cases") + 
+  labs(fill = "Commission support") + 
+  scale_fill_manual(values = c( "purple", "red")) + 
+  ggtitle("Who receives Commission support?")+ 
+  xlab("")+
+  theme_minimal()
+
+EU <- data %>% 
+  filter(commission_support == 1)
+
+prop.table(table(EU$type))*100
+
+rm(EU)
+@
+
+\subsection{Number of member states}
+<<member state, echo=TRUE, results='markup'>>=
+
+table(data$member_state)
+
+@
+
+
+\section{Descriptive statistics}
+This table gives an overview of the numeric variables in the data.
+<<descriptive stats, echo=TRUE, results='markup'>>=
+
+
+stats_data <- data.frame(data)
+names(stats_data)
+
+stats_data <- stats_data %>% 
+  select(4:5, 7:11)
+
+stargazer(stats_data, type = "text")
+
+rm(stats_data)
+@
+
+\section{Treatment-is-lawyer sample}
+<<names love plot, echo=TRUE, include=FALSE, results='markup'>>=
+# Creating variable names for the plot
+var_names <- data.frame(old = c("role_defendant", "type_Company", "type_EU institution", "type_Individual", "type_NGO", "type_Other", "type_State institution", "binary_salience", "type_opponent_Company",
+                                "type_opponent_EU institution", "type_opponent_Individual", "type_opponent_NGO", "type_opponent_Other", "type_opponent_State institution",
+                                "member_state_10",
+                                "member_state_12",
+                                "member_state_15",
+                                "member_state_6",
+                                "member_state_9",
+                                "government_support", 
+                                "commission_support"),
+  
+  new = c("Role Defendant", "Company", "EU institution", "Individual", "NGO", "Other", "State institution", "Salience (binary)", "Company opponent", "EU institution opponent", "Individual opponent", "NGO opponent", "Other opponent", "State institution opponent", "Members 10", "Members 12", "Members 15", "Members 6", "Members 9", "Government support", "Commission support"))
+@
+
+\subsection{Matching}
+<<treatment - lawyers, echo=TRUE, results='markup', warning=FALSE>>=
+
+# Treatment = having a lawyer
+sample_1 <- matchit(lawyer ~ role + 
+                      type + binary_salience + 
+                         type_opponent 
+                    + member_state 
+                    + government_support 
+                    + commission_support,
+                       method = "cem", 
+                       estimand = "ATT", 
+                       data = data)
+
+
+sample1 <- match.data(sample_1, data=data)
+
+love.plot(sample_1, 
+          title = "Treatment = having a lawyer", var.names = var_names)
+
+
+### Add more plots 
+
+### Review the sample 
+
+length(unique(sample1$celex))
+
+prop.table(table(sample1$ecjplaintiffagree))
+
+@
+
+\subsection{Analysis}
+<<treatment is lawyer, echo=TRUE, results='markup'>>=
+
+## Estimating a model with controls 
+
+law <- glm(win~ lawyer + role + type + 
+            type_opponent + member_state + 
+            binary_salience 
+           + lawyer*binary_salience
+           + government_support 
+           + commission_support, 
+          family = binomial(link = "logit"), 
+          data = sample1)
+
+
+
+beta_law <- law$coefficients
+
+tab_law <- (exp(beta_law)-1)*100
+tab_law
+
+
+vcov_law <- vcovHC(law, "HC1")
+
+stargazer(law, type = "text", se = list(vcov_law))
+
+stargazer(law, type = "text", se = list(vcov_law), style = "all2",  
+          single.row = TRUE, no.space = TRUE, font.size = "small", align = TRUE,
+          dep.var.caption = "Binomial logistic regression", 
+          dep.var.labels = "Favorable ruling", 
+         keep = c("lawyer", "role", 
+                  "type", "type_opponent", 
+                   "binary_salience", 
+                  "government_support", 
+                  "commission_support"), 
+         covariate.labels = c("Lawyer", "Defendant", "Company", 
+                              "Individual", "NGO", 
+                              "State institution", 
+                              "Opponent Company", 
+                              "Opponent Individual", 
+                              "Opponent NGO", 
+                              "Opponent State", 
+                              "Salience", 
+                              "Government support", 
+                              "Commission support", 
+                              "Interaction lawyer + salience"))
+
+
+sample1 %>% 
+  group_by(celex) %>% 
+  ggplot(aes(type, fill = as.factor(win))) +
+  geom_bar(aes(y = (..count..)/sum(..count..)*100), position = "dodge") + 
+  ylab("Percent of cases") + 
+  labs(fill = "Win") + 
+  scale_fill_manual(values = c( "purple", "red")) + 
+  ggtitle("Who win's in the CJEU?")+ 
+  xlab("")+ 
+  theme_minimal()
+
+sample1 %>% 
+  group_by(celex) %>% 
+  filter(type != "NGO" & type != "Other") %>% 
+  ggplot(aes(as.factor(win))) +
+  geom_bar(aes(y = (..count..)/sum(..count..)*100), position = "dodge", color = "pink", fill = "pink") + 
+  ylab("Percent of cases") + 
+  ggtitle("Who win's in the CJEU?")+ 
+  xlab("")+ 
+  theme_minimal() + 
+  facet_wrap(~ type) + 
+  xlab("Winning is flagged 1")
+
+
+
+
+@
+\subsection{Plotting effects}
+
+<<>>=
+
+# Estimating a new model without interaction 
+
+law1 <- glm(win~ lawyer + role + type + 
+            type_opponent + member_state + 
+            binary_salience 
+           + government_support 
+           + commission_support, 
+          family = binomial(link = "logit"), 
+          data = sample1)
+
+
+
+beta_law1 <- law1$coefficients
+
+tab_law1 <- (exp(beta_law1)-1)*100
+tab_law1
+
+vcov_law1 <- vcovHC(law1, "HC1")
+
+# Saving my se's in the model object
+cluster_law <- cluster.vcov(law, cluster = sample1$member_state)
+print(cluster_law)
+
+sqrt(diag(cluster_law))
+
+law$cluster_law <- cluster_law
+
+law1$vcov_law <- vcov_law1
+# Setting seed 
+set.seed(24)
+
+simBetas <- mvrnorm(n = 1000, 
+                    mu = coefficients(law1), 
+                    Sigma = law1$vcov_law)
+
+
+names(coefficients(law1))
+
+xMatrix <- cbind(1, #the intercept
+                 c(0, 1), # Let lawyer vary
+                 1, # defendant
+                 1, # Company
+                 0, # Individual
+                 0, # NGO
+                 0, # State institution 
+                 0, # opponent company
+                 0, # opponent individual
+                 0, # opponent NGO
+                 1, # opponent state institution
+                 0, # M 12
+                 0, # M 15
+                 0, # M 6, 
+                 1, # M 9, 
+                 mean(sample1$binary_salience), 
+                 1, # Government support, 
+                 1 # Commission support
+                 )
+
+
+
+
+ncol(simBetas) == ncol(xMatrix) #yay!!
+
+### Calculating predicted probabilities: Her multipliserer du simuleringen med xmatrisen 
+xBetaMatrix <- xMatrix %*% t(simBetas ) ## this just means x times the betas
+predProbs <- 1/(1+exp(-xBetaMatrix)) #This is the predicted probability, for another type of model you would replace this step with an appropriate formula
+
+
+### Getting point estimates and confidence intervals: 
+quantileValues <- apply(X = predProbs,  ## read up on the apply() family of functions!
+                        MARGIN = 1, ## this means we are applying a function to all the rows
+                        FUN =  ## The fun argument defines what I want to do with all the rows
+                          ## What we want to do here is to use quantile to get the quantiles representing the lower and upper
+                          ### bounds of the confidence intervals and our point estimates: 
+                          quantile, probs = c(.05,.5,.95))
+quantileValues <- as.data.frame(t(quantileValues)) 
+
+plotPoints <- cbind(c("No lawyer", "Lawyer"),quantileValues)
+plotPoints
+colnames(plotPoints) <- c("Lawyer", "lower", "estimate", "upper")
+
+
+
+ggplot(plotPoints, 
+       aes(x = Lawyer, 
+           y = estimate, 
+           ymin = lower, 
+           ymax = upper)) +
+  geom_errorbar(width =.2)+
+  geom_point()+
+  ylim(0,1)+
+  ylab("Predicted probability of a favorable ruling")+
+  xlab("")+
+  theme_minimal() + 
+  ggtitle("Company against state institution with support")
+
+@
+
+
+\section{Treatment-is-experience sample}
+\subsection{Matching}
+<<matching lawyer sample, echo=TRUE, results='markup', warning=FALSE>>=
+
+# Filtering out a sample consisting of parties with only lawyers
+df <- data %>% 
+  filter(lawyer == 1) %>% 
+  ungroup()
+
+
+sample_2 <- matchit(experience ~ role + type 
+                    + binary_salience + 
+                         type_opponent 
+                    + member_state + 
+                    government_support 
+                    + commission_support, 
+                       method = "cem", 
+                       estimand = "ATT", 
+                       data = df)
+
+
+sample2 <- match.data(sample_2, data=df)
+
+
+# Checking balance 
+
+love.plot(sample_2, var.names = var_names, title = "Treatment = experience")
+
+# Add more balance plots 
+
+length(unique(sample2$celex))
+
+table(sample2$role)
+
+prop.table(table(sample2$ecjplaintiffagree))
+
+prop.table(table(sample2$experience, sample2$type))*100
+
+
+@
+
+
+\subsection{Analysis}
+<<we have lawyers, echo=TRUE, results='markup'>>=
+
+## Estimating a model with controls 
+
+m2 <- glm(win~ experience + role + type + 
+            type_opponent + member_state + 
+            binary_salience 
+          + government_support 
+          + commission_support, 
+          family = binomial(link = "logit"), 
+          data = sample2)
+
+beta2 <- m2$coefficients
+
+tab2 <- (exp(beta2)-1)*100
+tab2
+
+
+
+vcov_m2 <- vcovHC(m2, "HC1")
+
+stargazer(m2, type = "text", se = list(vcov_m2))
+
+
+stargazer(m2, type = "text", 
+          se = list(vcov_m2), 
+          style = "all2",  
+          single.row = TRUE, 
+          no.space = TRUE, 
+          font.size = "small",
+          align = TRUE,
+          dep.var.caption = 
+            "Binomial logistic regression", 
+          dep.var.labels = "Favorable ruling", 
+         keep = c("experience", "role", 
+                  "type", 
+                  "type_opponent", 
+                   "binary_salience",
+                  "government_support", 
+                  "commission_support"), 
+         covariate.labels = c("Experience",
+                              "Defendant",
+                              "Company", 
+                              "Individual", "NGO",
+                              "State institution", 
+                              "Opponent Company", 
+                              "Opponent Individual",
+                              "Opponent NGO", 
+                              "Opponent State",
+                              "Salience", 
+                              "Government support",
+                              "Commission support" 
+                  ))
+
+
+sample2 %>% 
+  group_by(celex) %>% 
+  ggplot(aes(type, fill = as.factor(experience))) +
+  geom_bar(aes(y = (..count..)/sum(..count..)*100), position = "dodge") + 
+  ylab("Percent of cases") + 
+  labs(fill = "Experienced attorney") + 
+  scale_fill_manual(values = c( "purple", "red")) + 
+  ggtitle("Who has experience in the CJEU?")+ 
+  xlab("")+ 
+  theme_minimal()
+
+sample2 %>% 
+  group_by(celex) %>% 
+  filter(type != "NGO" & type != "Other") %>% 
+  ggplot(aes(as.factor(win), fill = as.factor(experience))) +
+  labs(fill = "Experienced attorney")+
+  geom_bar(aes(y = (..count..)/sum(..count..)*100), position = "dodge") + 
+  ylab("Percent of cases") + 
+  ggtitle("Who wins in the CJEU?")+ 
+  xlab("")+ 
+  theme_minimal() + 
+  facet_wrap(~ type) + 
+  xlab("Winning is flagged 1")+ 
+  scale_fill_manual(values = c( "purple", "red"))
+
+table(sample2$type)
+
+
+@
+
+\subsection{Plotting effects -- creating scenarios}
+<<scenario1, echo=TRUE, results='markup'>>=
+
+# Saving my se's in the model object
+
+
+m2$cluster_m2 <- vcov_m2
+
+# Setting seed 
+set.seed(24)
+
+simBetas <- mvrnorm(n = 1000, 
+                    mu = coefficients(m2), 
+                    Sigma = m2$cluster_m2)
+
+
+names(coefficients(m2))
+
+xMatrix <- cbind(1, #the intercept
+                 c(0, 1), # Let experience vary
+                 1, # defendant
+                 1, # Company
+                 0, # Individual
+                 0, # NGO
+                 0, # State institution 
+                 0, # opponent company
+                 0, # opponent individual
+                 0, # opponent NGO
+                 1, # opponent state institution
+                 0, # M 12
+                 0, # M 15
+                 0, # M 6, 
+                 1, # M 9, 
+                 mean(sample1$binary_salience), 
+                 0, # Government support, 
+                 0 # Commission support
+                 )
+
+
+ncol(simBetas) == ncol(xMatrix) #yay!!
+
+### Calculating predicted probabilities: Her multipliserer du simuleringen med xmatrisen 
+xBetaMatrix <- xMatrix %*% t(simBetas ) ## this just means x times the betas
+predProbs <- 1/(1+exp(-xBetaMatrix)) #This is the predicted probability, for another type of model you would replace this step with an appropriate formula
+
+
+### Getting point estimates and confidence intervals: 
+quantileValues <- apply(X = predProbs,  ## read up on the apply() family of functions!
+                        MARGIN = 1, ## this means we are applying a function to all the rows
+                        FUN =  ## The fun argument defines what I want to do with all the rows
+                          ## What we want to do here is to use quantile to get the quantiles representing the lower and upper
+                          ### bounds of the confidence intervals and our point estimates: 
+                          quantile, probs = c(.05,.5,.95))
+quantileValues <- as.data.frame(t(quantileValues)) 
+
+plotPoints <- cbind(c("No experience", "Experience"),quantileValues)
+plotPoints
+colnames(plotPoints) <- c("Experience", "lower", "estimate", "upper")
+
+
+
+ggplot(plotPoints, 
+       aes(x = Experience, 
+           y = estimate, 
+           ymin = lower, 
+           ymax = upper)) +
+  geom_errorbar(width =.2)+
+  geom_point()+
+  ylim(0,1)+
+  ylab("Predicted probability of a favorable ruling")+
+  xlab("")+
+  theme_minimal() + 
+  ggtitle("Company against state institution without support")
+
+
+@
+
+\section{Digasnostics}
+The underlying assumption of the logistical regression model are that  (1) the dependent variable is binary; (2) the probability curve is S-shaped and the logit curve is linear; (3) there are no influential observations; (4) there is no multicollinearity among the predictors; (5) there are no empty cells; (6) there is no "complete separation"; (7) no omitted variable bias and (8) the observations are independent and identically distributed. 
+
+\hfill \break In this section I go through each of the assumptions and evaluate the model where I control salience, role and type of actor. 
+
+\hfill \break The first assumption holds as the dependent variable is binary -- 0 for lost case and 1 for won case. The assumption that the observations are independent and identically distributed is not relevant because I am dealing with observations data -- and the data at hand is the sample of cases are more or less equal to universe of cases. No omitted variable bias is a theoretical assumption. There are many unobserved factors that may affect not just the assignment to treatment, but also the decision of the Court and the cases that end up in the CJEU in the first place. This is not controlled for because many of the mechanisms that may affect assignment to treatment, cases being referred and the decision of the CJEU are unobservable. 
+
+
+\subsubsection{The regression has the shape of an S}
+In order to investigate if the second assumption holds I make sure that the relationship between the independent variables and the logit-outcome is linear. To show this graphically is difficult when the variables are characters. 
+<<S shape, eval=FALSE>>=
+
+
+
+@
+
+\subsubsection{Influential values}
+Checking for influential values. Plotting the standardized residuals. The standard normal distribution lies between -4 and 4. Values above three indicates outliers and should be further investigated as they might affect the results. 
+
+<<influential values, echo=TRUE, results='markup'>>=
+# Sample1 model
+model.data <- augment(law) %>% 
+  mutate(index = 1:n())
+
+model.data %>% 
+  top_n(3, .cooksd)
+
+ggplot(model.data, aes(index, .std.resid))+
+  geom_point(aes(color = win), alpha = .5) + 
+  theme_minimal() + 
+  ylab("Standardized residuals") + 
+  xlab("Observations")
+
+# Manual count 
+model.data %>% 
+  filter(abs(.std.resid) > 3)
+
+# Sample2 model
+model.data <- augment(m2) %>% 
+  mutate(index = 1:n())
+
+model.data %>% 
+  top_n(3, .cooksd)
+
+ggplot(model.data, aes(index, .std.resid))+
+  geom_point(aes(color = win), alpha = .5) + 
+  theme_minimal() + 
+  ylab("Standardized residuals") + 
+  xlab("Observations")
+
+# Manual count 
+model.data %>% 
+  filter(abs(.std.resid) > 3)
+
+
+@
+\subsubsection{Multicollinearity} 
+VIF-test measures how much of the variance in each independent variable can be explained by the other variables in the analysis. As a general rule of thumb a VIF-value under 5 indicates no multicolinearity, whilst values between 5 and 10 is considered no ideal, but yet not very problematic (Hermansen, 2019, p. 195). Values above 10 indicates strong multicolinearity(ibid). 
+
+<<vif, echo = TRUE, results='markup'>>=
+
+vif(law)
+vif(m2)
+@
+Running the VIF-test I find that all my independent variables have VIF-values between 1 and 3 which indicates no multicolinearity. 
+
+\subsubsection{Complete seperation}
+Checking for complete separation is easily done by plotting the data. The plot below indicates that also this assumption is met. Checking for empty cells is unecessary are observations with missing values are not included in the model. 
+
+\subsection{Goodness of fit}
+\subsubsection{McFadden's pseudo R2}
+McFadden's pseudo R2 is a measure that compares the log-likelihood value for my model and compares it to the log-likelihood value of a model without any variables -- an intercept-only model (Christiphersen, 2013, p. 139). The value ranges from zero to one. Values closer to 1 indicates good predictive power. Values closer to zero indicates no predictive power. The results show that the model is better than an intercept-only model, however, the model does not explain much of the variation. The models with more variables have slightly higher McFadden scores. 
+
+<<pseudo r, echo = TRUE, results='marup'>>=
+
+PseudoR2(law, which = c("McFadden", "AIC", "BIC", "logLik"))
+PseudoR2(law)
+
+PseudoR2(m2, which = c("McFadden", "AIC", "BIC", "logLik"))
+PseudoR2(m2)
+
+
+@
+
+\subsubsection{Hosmler-Lemeshow-test}
+Tests ho good the model fits the data by comparing observed and predicted values -- meaning that it compares the observed, real values of 1 and + to the models fitted values (ibid). The test does this by comparing subgroups of the population estimated. The Hosmer-Lemeshow-test is not supposed to give significant results, because this means that the model is not a good fit for the data. The results from running the test are not significant suggesting that the model is good at describing the data. 
+
+<<HL-test, echo=TRUE, results='markup'>>=
+
+############# Sample1 model
+hl <- hoslem.test(law$y, 
+                  fitted(law), 
+                  g = 10) 
+# G= 10 ten subgroups
+hl
+
+# Shows difference in 
+# observed and expected Y-values
+# for ten subgroups
+cbind(hl$expected, hl$observed)
+
+
+############# Sample2 model 
+hl <- hoslem.test(law$y, 
+                  fitted(law), 
+                  g = 10) 
+# G= 10 ten subgroups
+hl
+# Shows difference in 
+# observed and expected Y-values
+# for ten subgroups
+cbind(hl$expected, hl$observed)
+
+@
+\subsubsection{How well does my model predict?}
+I am modelling predicted probabilitites. To estimate how well my models predict, a ROC-cruve can be helpful (Receiving Operating Characteristics). When using logistical regression, the goal is a model that predicts the outcome of the indepdent variable corectly at all times. The ROC-curve shows how well my model predics by determining the relationship between true positive values (the predictions my model predics as 1 that is observed to be 1) and false positive values (the prediction my model predicts as 1 but is actually 0) using various cut-off values. I create a ROC-curve to evaluate the overall performance of my model. The ROC-curve defines the optimal cut-off value for me -- indicating at which point from 0 to 100 my model predicts correctly. Is my model correct in 70 percent of all the instances? Is my model correct in 60 percent of all instances?
+
+<<roc-curve, echo=TRUE, results='markup'>>=
+
+# Sample1 model 
+preds <- predict(law, 
+                 sample1, 
+                 type = "response")
+
+roc_obj <- roc(sample1$win, preds)
+
+auc_m2 <- auc(roc_obj)
+
+auc_m2 <- round(auc_m2, digits = 3)
+
+law_roc <- ggroc(roc_obj, color="pink", size = 2) + 
+  ggtitle(paste0("ROC Curve ", "(AUC =", auc_m2, ")")) + 
+  theme_minimal()
+
+law_roc
+
+test <- table(predicted = ifelse(preds > auc_m2, 1, 0), 
+              observed = sample1$win)
+
+test
+
+
+# Sample3 model 
+preds <- predict(m2, 
+                 sample2, 
+                 type = "response")
+
+roc_obj <- roc(sample2$win, preds)
+
+auc_m2 <- auc(roc_obj)
+
+auc_m2 <- round(auc_m2, digits = 3)
+
+m2_roc <- ggroc(roc_obj, color="pink", size = 2) + 
+  ggtitle(paste0("ROC Curve ", "(AUC =", auc_m2, ")")) + 
+  theme_minimal()
+
+m2_roc
+test <- table(predicted = ifelse(preds > auc_m2, 1, 0), 
+              observed = sample2$win)
+
+test
+@
+
+\hfill \break Area under the curve (AUC) equal to 1 means that the model makes perfect predictions, meaning that the model predicts Y = 1 when Y=1 is observed in all incidents. The model predicts correctly in approximately 84 percent of all incidents. The model I have made is able to classify Y = 1 and Y = 0 correctly in approximately 84 percent of the time.  
+
+\end{document}
